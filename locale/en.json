@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "ASCII Water Wallpaper",
+    "description": "A live ASCII water-ripple wallpaper rendered under every DSH surface. Black base with flowing, vortex-twisted ASCII water in three depth bands; cursor movement trails ripples, clicks fire impact ripples, and idle hover breathes small ripples. Floating particle glyphs drift slowly. Upper DSH components become translucent so the animation shows through, and all parameters - base/character color, font size, flow speed, ripple radius, click strength, ripple cap, trail gap/scale, particle count, and UI layer opacity - are editable live in this plugin's settings. The animation pauses when the page is hidden, respects reduced motion, adapts to DPR and ultra-wide screens, and supports touch.",
+    "detail": "docs/DETAIL.md"
+  }
+}

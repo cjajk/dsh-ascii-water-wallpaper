@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="ASCII water ripple">
+  <rect width="64" height="64" rx="14" fill="#05070a"/>
+  <!-- concentric ripples -->
+  <circle cx="32" cy="34" r="4" fill="none" stroke="#4a6a8a" stroke-width="1.4" opacity="0.85"/>
+  <circle cx="32" cy="34" r="9" fill="none" stroke="#d7e6f2" stroke-width="1.2" opacity="0.7"/>
+  <circle cx="32" cy="34" r="15" fill="none" stroke="#2c6f9e" stroke-width="1.1" opacity="0.55"/>
+  <circle cx="32" cy="34" r="22" fill="none" stroke="#8fb9d4" stroke-width="1" opacity="0.4"/>
+  <!-- ascii glyphs -->
+  <g fill="#eaf3fa" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="7">
+    <text x="9" y="14">.</text>
+    <text x="48" y="10">:</text>
+    <text x="54" y="26">~</text>
+    <text x="12" y="46">*</text>
+    <text x="50" y="52">O</text>
+    <text x="26" y="8" opacity="0.5">&#39;</text>
+    <text x="8" y="30" opacity="0.55">-</text>
+    <text x="42" y="44" opacity="0.6">=</text>
+  </g>
+</svg>
