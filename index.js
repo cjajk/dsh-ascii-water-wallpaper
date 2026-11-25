@@ -29,7 +29,7 @@ export const Config = z.object({
   trailGap: slider(12, 2, 80, 1).description('轨迹涟漪间距 Trail ripple gap (px)').volatile(),
   trailScale: slider(0.38, 0.1, 1, 0.01).description('轨迹涟漪缩放 Trail ripple scale').volatile(),
   particleCount: slider(34, 0, 200, 1).description('悬浮颗粒数量 Floating particle count').volatile(),
-  uiOpacity: z.percent().default(0.85).description('上层组件整体半透明透明度 UI layer opacity (0-1)').volatile(),
+  uiOpacity: z.percent().default(0.72).description('所有界面面板/任务框的不透明度（1=不透明，越小越透，0=完全透明）UI panel opacity (0-1)').volatile(),
 })
 
 /** Host 半无运行时行为；客户端负责渲染。 */

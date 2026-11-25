@@ -3,8 +3,9 @@
  *
  * 职责：
  *  1. 在 DSH 所有 UI 之下（#root 之前）插入全屏 canvas，绘制 ASCII 水纹。
- *  2. 通过 theme.overrideTokens 把上层组件的背景 token 调成半透明，
- *     让底层水纹从组件后透出；透明度由「uiOpacity」滑块实时调节。
+ *  2. 把上层界面的背景调成半透明，让底层水纹从组件后透出：
+ *     一路改写 surface token（直接写 CSS 变量，不依赖主题服务），
+ *     一路扫描已渲染的面板/任务框就地降不透明度；由「uiOpacity」滑块实时调节。
  *  3. 通过 ctx.configForms 读取并实时响应该插件自己的可调配置。
  *
  * 算法沿用参考 HTML 的流场（domain-warp 涡流）、Ripple 涟漪类、
@@ -45,7 +46,7 @@ window.__ModuleLoader__.load({
       trailGap: 12,
       trailScale: 0.38,
       particleCount: 34,
-      uiOpacity: 0.85,
+      uiOpacity: 0.72,
     })
 
     /* ---------- 小工具 ---------- */
@@ -474,7 +475,15 @@ window.__ModuleLoader__.load({
     }
 
     /* ============================================================
-     *  上层组件半透明：采样当前主题基础色，再按 uiOpacity 调低不透明度
+     *  上层界面半透明（两路同时生效）
+     *
+     *  1) 直接把 DSH 的 surface token 改写成 rgba(...) !important。
+     *     不再依赖主题服务的 overrideTokens —— 那条 API 一旦不生效，
+     *     界面就会保持全不透明，背景完全被盖住（本次问题就出在这里）。
+     *  2) 再扫描已经渲染出来的面板/任务框，把不透明的背景色就地换成
+     *     同色半透明。用来兜住那些不吃 token、走固定色或行内样式的框。
+     *
+     *  两路都跟着 uiOpacity 滑块实时变，1 = 不透明，0 = 完全透明。
      * ============================================================ */
     const SURFACE_TOKENS = [
       '--dsw-alias-bg-base',
@@ -484,60 +493,109 @@ window.__ModuleLoader__.load({
       '--dsw-specific-sidebar-fill',
     ]
 
-    function sampleBasePalette(body) {
-      const hadDark = body.hasAttribute('data-ds-dark-theme')
-      const palette = {}
-      for (const name of SURFACE_TOKENS) {
-        body.removeAttribute('data-ds-dark-theme')
-        const light = getComputedStyle(body).getPropertyValue(name).trim()
-        body.setAttribute('data-ds-dark-theme', '')
-        const dark = getComputedStyle(body).getPropertyValue(name).trim()
-        palette[name] = { light, dark }
+    /** 把 #hex / rgb() / rgba() 解析成 { r, g, b, a }；解析不了返回 null。 */
+    function parseAnyColor(value) {
+      const s = String(value ?? '').trim()
+      if (!s || s === 'transparent') return { r: 0, g: 0, b: 0, a: 0 }
+      if (s.startsWith('#')) {
+        const rgb = parseColor(s)
+        return { r: rgb[0], g: rgb[1], b: rgb[2], a: 1 }
       }
-      if (hadDark) body.setAttribute('data-ds-dark-theme', '')
-      else body.removeAttribute('data-ds-dark-theme')
-      return palette
+      const m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+%?))?\s*\)/.exec(s)
+      if (!m) return null
+      let a = 1
+      if (m[4] !== undefined) a = m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4])
+      return { r: clampByte(m[1]), g: clampByte(m[2]), b: clampByte(m[3]), a: clamp(a, 0, 1) }
     }
 
-    function opacify(color, pct) {
-      if (!color || color.includes('var(')) return null
-      return `color-mix(in srgb, ${color} ${pct}%, transparent)`
+    const cssRgba = (c, alpha) => `rgba(${c.r}, ${c.g}, ${c.b}, ${clamp(alpha, 0, 1).toFixed(3)})`
+
+    /** 读当前主题下各 surface token 的实际颜色；拿不到就退回 body 底色。 */
+    function readSurfaceColors() {
+      const style = getComputedStyle(document.body)
+      const bodyBg = parseAnyColor(style.backgroundColor)
+      const base = bodyBg && bodyBg.a > 0 ? bodyBg : { r: 18, g: 20, b: 24, a: 1 }
+      const colors = {}
+      for (const name of SURFACE_TOKENS) {
+        const parsed = parseAnyColor(style.getPropertyValue(name))
+        colors[name] = parsed && parsed.a > 0 ? parsed : base
+      }
+      return colors
+    }
+
+    /** 面板扫描：记住原始底色，再把同一个色换成带 alpha 的 rgba。 */
+    const panelOriginal = new Map()
+
+    function sweepPanels(alpha) {
+      for (const el of panelOriginal.keys()) {
+        if (!el.isConnected) panelOriginal.delete(el)
+      }
+      const nodes = document.body.querySelectorAll('*')
+      for (let i = 0; i < nodes.length; i++) {
+        const el = nodes[i]
+        if (!(el instanceof HTMLElement) || el.id === CANVAS_ID) continue
+        let orig = panelOriginal.get(el)
+        if (!orig) {
+          const cs = getComputedStyle(el)
+          if (cs.backgroundImage !== 'none') continue // 渐变/图片背景不碰
+          const c = parseAnyColor(cs.backgroundColor)
+          if (!c || c.a < 1) continue // 本来是透明或半透明的都保持原样
+          orig = { r: c.r, g: c.g, b: c.b }
+          panelOriginal.set(el, orig)
+        }
+        el.style.setProperty('background-color', cssRgba(orig, alpha))
+      }
+    }
+
+    function restorePanels() {
+      for (const el of panelOriginal.keys()) el.style.removeProperty('background-color')
+      panelOriginal.clear()
     }
 
     return {
-      inject: ['configForms', 'theme'],
+      inject: ['configForms'],
       apply(ctx) {
         const form = ctx.configForms.get(NS)
 
-        let basePalette = null
-        let disposeTokens = null
+        let currentAlpha = clamp(DEFAULTS.uiOpacity, 0, 1)
+        let styleTag = null
+        let sweepRaf = 0
+        let sweepTimer = 0
+        let observer = null
 
-        const applyTransparency = (opacity) => {
-          const pct = Math.round(clamp(opacity, 0, 1) * 100)
-          if (!basePalette) basePalette = sampleBasePalette(document.body)
-          const tokens = {}
-          for (const name of SURFACE_TOKENS) {
-            const pair = basePalette[name] || { light: '#ffffff', dark: '#101113' }
-            const light = opacify(pair.light, pct) || `rgba(255,255,255,${clamp(opacity, 0, 1)})`
-            const dark = opacify(pair.dark, pct) || `rgba(16,17,19,${clamp(opacity, 0, 1)})`
-            tokens[name] = { light, dark }
-          }
-          if (disposeTokens) disposeTokens()
-          disposeTokens = ctx.theme.overrideTokens(ID, tokens)
+        const scheduleSweep = () => {
+          if (sweepRaf) return
+          sweepRaf = requestAnimationFrame(() => {
+            sweepRaf = 0
+            sweepPanels(currentAlpha)
+          })
         }
 
-        ctx.effect(() => {
-          // 1. 注入全局样式：#root 抬到背景层之上
-          const styleTag = document.createElement('style')
-          styleTag.dataset.plugin = ID
-          styleTag.textContent = `
-            #root { position: relative; z-index: 1; }
-            #${CANVAS_ID} {
+        const applyOpacity = (opacity) => {
+          const next = Number(opacity)
+          currentAlpha = clamp(Number.isFinite(next) ? next : DEFAULTS.uiOpacity, 0, 1)
+          if (!styleTag) return
+          const colors = readSurfaceColors()
+          const tokenDecls = SURFACE_TOKENS
+            .map(name => `${name}: ${cssRgba(colors[name], currentAlpha)} !important;`)
+            .join(' ')
+          styleTag.textContent = [
+            `:root, body, body * { ${tokenDecls} }`,
+            `html, body { background: transparent !important; }`,
+            `#root { position: relative; z-index: 1; background: transparent !important; }`,
+            `#${CANVAS_ID} {
               position: fixed; top: 0; left: 0; margin: 0; padding: 0;
               width: 100%; height: 100%; z-index: 0;
               pointer-events: none; touch-action: none; background: #000;
-            }
-          `
+            }`,
+          ].join('\n')
+          scheduleSweep()
+        }
+
+        ctx.effect(() => {
+          // 1. 样式标签（内容由 applyOpacity 按当前透明度写入）
+          styleTag = document.createElement('style')
+          styleTag.dataset.plugin = ID
           document.head.appendChild(styleTag)
 
           // 2. 创建底层全屏 canvas，插到 #root 之前
@@ -552,27 +610,43 @@ window.__ModuleLoader__.load({
           const applyAll = () => {
             const cfg = readConfig()
             engine.setConfig(cfg)
-            // 首次 config 就绪时（异步）再进行透明度采样，主题样式必然已注入
-            applyTransparency(cfg.uiOpacity ?? DEFAULTS.uiOpacity)
+            applyOpacity(cfg.uiOpacity ?? DEFAULTS.uiOpacity)
           }
 
           engine.start()
           engine.setConfig(readConfig())
 
-          // 首帧后再套用透明度，确保主题基础色已就绪
+          // 首帧后再套用透明度，确保 body 与被覆盖的样式已就绪
           let rafInit = requestAnimationFrame(applyAll)
           const unsubscribe = form.subscribe(() => {
             cancelAnimationFrame(rafInit)
             applyAll()
           })
 
+          // 4. 面板/任务框是随使用动态挂载的，增量补扫
+          observer = new MutationObserver(() => {
+            if (sweepTimer) return
+            sweepTimer = setTimeout(() => {
+              sweepTimer = 0
+              scheduleSweep()
+            }, 350)
+          })
+          observer.observe(document.body, { childList: true, subtree: true })
+
           return () => {
             cancelAnimationFrame(rafInit)
+            if (sweepRaf) cancelAnimationFrame(sweepRaf)
+            if (sweepTimer) clearTimeout(sweepTimer)
+            if (observer) {
+              observer.disconnect()
+              observer = null
+            }
             unsubscribe()
             engine.stop()
+            restorePanels()
             if (canvas.parentNode) canvas.parentNode.removeChild(canvas)
-            if (styleTag.parentNode) styleTag.parentNode.removeChild(styleTag)
-            if (disposeTokens) { disposeTokens(); disposeTokens = null }
+            if (styleTag && styleTag.parentNode) styleTag.parentNode.removeChild(styleTag)
+            styleTag = null
           }
         })
       },
