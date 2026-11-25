@@ -1,6 +1,6 @@
 {
   "name": "@local/ascii-water-wallpaper",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "DSH 桌面壳 ASCII 水纹动态背景主题插件：全屏 ASCII 水流壁纸 + 鼠标涟漪，上层组件半透明。",

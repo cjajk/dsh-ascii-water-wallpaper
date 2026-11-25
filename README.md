@@ -59,8 +59,10 @@ plugin_manager install_bundle <克隆目录的绝对路径>
 
 v1.1 起不再依赖主题服务的 `overrideTokens`（该接口不生效时界面会一点也不透，背景被完全盖住），改成两路同时生效：
 
-1. **改写 surface token**：把 `--dsw-alias-bg-base`、`--dsw-alias-bg-layer-1/2`、`--dsw-alias-bg-overlay`、`--dsw-specific-sidebar-fill` 直接写成 `rgba(主题底色, uiOpacity) !important`，并把 `#root`、`html`、`body` 的底色置为透明。
-2. **面板扫描**：遍历已渲染的元素，凡是「不透明背景 + 无渐变/图片背景」的，把同一种颜色就地换成同色半透明（原始色记在内存里，卸载时还原）。挂载新面板时由 `MutationObserver` 增量补扫，所以新开的任务框也会跟着变透。
+1. **改写 surface token**：把 `--dsw-alias-bg-base`、`--dsw-alias-bg-layer-1/2`、`--dsw-alias-bg-overlay`、`--dsw-specific-sidebar-fill` 直接写成 `rgba(主题底色, uiOpacity) !important`，并把 `html`、`body` 的底色置为透明。采样前会临时摘掉自己的覆盖，所以主题明暗切换后读到的是新主题的底色（v1.2）。
+2. **面板扫描**：遍历已渲染的元素，凡是「不透明背景 + 无渐变/图片背景 + 面积 ≥ 10000 px²」的，把同一种颜色就地换成同色半透明（原始色记在内存里，卸载时还原）。挂载新面板时由 `MutationObserver` 增量补扫，所以新开的任务框也会跟着变透。小号按钮、输入框不接管，保留它们本来的 hover / 选中反馈（v1.2）。
+
+**为什么不碰 `#root`（v1.2）**：给 `#root` 挂 `z-index` 或 `backdrop-filter` 会生成堆叠上下文 / 包含块，菜单、tooltip、toast、窗口标题栏按钮这类 `position: fixed` 浮层可能被锁在里面或被裁掉。v1.2 改成把画布 `z-index: -1` 沉到所有内容之下，`#root` 完全不动，效果一样但没有副作用。这个坑是参考 `TQSY114514/dsh-ui-appearance` 的实现笔记后修的。
 
 ## 文件结构
 
@@ -72,8 +74,8 @@ v1.1 起不再依赖主题服务的 `overrideTokens`（该接口不生效时界�
 ## 已知可优化点
 
 - 流场逐格逐帧重算（1920×1080 约 2.1 万格，本机纯计算约 5.8 ms/帧），低端设备可考虑降帧或半分辨率插值。
-- 主题明暗切换后不会重新采样上层底色，半透明底色会沿用启动时采到的调色板。
 - 字符抖动使用逐帧随机，视觉上有轻微噪点，可改为按格哈希以获得稳定纹理。
+- 透明度目前只有一个总滑块；参考同类插件可拆成「主面板 / 侧栏 / 弹窗 / 菜单 / 输入框」多通道。
 
 ## 许可
 

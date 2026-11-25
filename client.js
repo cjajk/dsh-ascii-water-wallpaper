@@ -479,7 +479,7 @@ window.__ModuleLoader__.load({
      *
      *  1) 直接把 DSH 的 surface token 改写成 rgba(...) !important。
      *     不再依赖主题服务的 overrideTokens —— 那条 API 一旦不生效，
-     *     界面就会保持全不透明，背景完全被盖住（本次问题就出在这里）。
+     *     界面就会保持全不透明，背景完全被盖住（v1.0 的问题就出在这里）。
      *  2) 再扫描已经渲染出来的面板/任务框，把不透明的背景色就地换成
      *     同色半透明。用来兜住那些不吃 token、走固定色或行内样式的框。
      *
@@ -525,6 +525,8 @@ window.__ModuleLoader__.load({
 
     /** 面板扫描：记住原始底色，再把同一个色换成带 alpha 的 rgba。 */
     const panelOriginal = new Map()
+    /** 小于这个面积（px²）的元素不接管，保留它们本来的 hover / 选中反馈。 */
+    const PANEL_MIN_AREA = 10000
 
     function sweepPanels(alpha) {
       for (const el of panelOriginal.keys()) {
@@ -536,6 +538,9 @@ window.__ModuleLoader__.load({
         if (!(el instanceof HTMLElement) || el.id === CANVAS_ID) continue
         let orig = panelOriginal.get(el)
         if (!orig) {
+          // 只处理“面板级”的大块元素：小按钮、输入框的 hover 高亮全靠样式表，
+          // 一旦被行内样式钉死就会失去悬停反馈，所以按面积筛一道。
+          if (el.offsetWidth * el.offsetHeight < PANEL_MIN_AREA) continue
           const cs = getComputedStyle(el)
           if (cs.backgroundImage !== 'none') continue // 渐变/图片背景不碰
           const c = parseAnyColor(cs.backgroundColor)
@@ -562,6 +567,17 @@ window.__ModuleLoader__.load({
         let sweepRaf = 0
         let sweepTimer = 0
         let observer = null
+        let themeObserver = null
+
+        /** 采样时必须先摘掉自己的覆盖，否则永远读回自己上一次写的 rgba。 */
+        const readFreshSurfaces = () => {
+          if (!styleTag) return readSurfaceColors()
+          const saved = styleTag.textContent
+          styleTag.textContent = ''
+          const colors = readSurfaceColors()
+          styleTag.textContent = saved
+          return colors
+        }
 
         const scheduleSweep = () => {
           if (sweepRaf) return
@@ -575,17 +591,20 @@ window.__ModuleLoader__.load({
           const next = Number(opacity)
           currentAlpha = clamp(Number.isFinite(next) ? next : DEFAULTS.uiOpacity, 0, 1)
           if (!styleTag) return
-          const colors = readSurfaceColors()
+          const colors = readFreshSurfaces()
           const tokenDecls = SURFACE_TOKENS
             .map(name => `${name}: ${cssRgba(colors[name], currentAlpha)} !important;`)
             .join(' ')
           styleTag.textContent = [
             `:root, body, body * { ${tokenDecls} }`,
+            // body / html 让出底色，canvas 才能从最底下透出来
             `html, body { background: transparent !important; }`,
-            `#root { position: relative; z-index: 1; background: transparent !important; }`,
+            // 刻意不碰 #root：给它 z-index / backdrop-filter 会生成堆叠上下文与
+            // 包含块，把菜单、tooltip、toast 这些 fixed 浮层锁在里面或裁掉。
+            // 改用 z-index: -1 把画布沉到所有内容之下，效果一样但零副作用。
             `#${CANVAS_ID} {
-              position: fixed; top: 0; left: 0; margin: 0; padding: 0;
-              width: 100%; height: 100%; z-index: 0;
+              position: fixed; inset: 0; margin: 0; padding: 0;
+              width: 100%; height: 100%; z-index: -1;
               pointer-events: none; touch-action: none; background: #000;
             }`,
           ].join('\n')
@@ -633,6 +652,16 @@ window.__ModuleLoader__.load({
           })
           observer.observe(document.body, { childList: true, subtree: true })
 
+          // 5. 主题明暗切换（body 的 class / data-ds-dark-theme 变了）要重新采样，
+          //    否则会一直沿用启动时那套底色。
+          themeObserver = new MutationObserver(() => {
+            applyOpacity(currentAlpha)
+          })
+          themeObserver.observe(document.body, {
+            attributes: true,
+            attributeFilter: ['class', 'data-ds-dark-theme'],
+          })
+
           return () => {
             cancelAnimationFrame(rafInit)
             if (sweepRaf) cancelAnimationFrame(sweepRaf)
@@ -640,6 +669,10 @@ window.__ModuleLoader__.load({
             if (observer) {
               observer.disconnect()
               observer = null
+            }
+            if (themeObserver) {
+              themeObserver.disconnect()
+              themeObserver = null
             }
             unsubscribe()
             engine.stop()
