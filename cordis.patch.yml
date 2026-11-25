@@ -1,0 +1,8 @@
+# ASCII 水纹动态背景 —— 桌面底层壁纸插件
+#
+# 该行将插件注册进 DSH 插件体系；`id` 即配置命名空间，
+# 客户端通过 ctx.configForms.get('ascii-water') 读取同一份可调配置。
+- insert:
+    - id: ascii-water
+      name: '@local/ascii-water-wallpaper'
+      config: {}
